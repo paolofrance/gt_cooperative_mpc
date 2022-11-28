@@ -1,5 +1,7 @@
 #include "ros/ros.h"
 #include <Eigen/Dense>
+#include <gt_coop_mpc/mpc_utils.h>
+
 
 Eigen::MatrixXd blkdiag(const Eigen::MatrixXd& a, int count)
 {
@@ -105,7 +107,9 @@ int main(int argc, char **argv)
   ros::init(argc, argv, "talker");
   ros::NodeHandle n;
   
-  int N=5;
+  DistMPC dMPC;
+  
+  int N=2;
 
   Eigen::MatrixXd A;
   Eigen::MatrixXd B;
@@ -113,13 +117,31 @@ int main(int argc, char **argv)
   A.resize(2,2);
   B.resize(2,1);
   C.resize(1,2);
-  A << 1  , 0.00975,
-       0  , 0.95122;
-  
-  B << 0.0000049176,
-       0.0009754115;
+//   A << 1  , 0.00975,
+//        0  , 0.95122;
+//   
+//   B << 0.0000049176,
+//        0.0009754115;
   
   C << 1, 0;
+  
+  Eigen::MatrixXd Ac;
+  Eigen::MatrixXd Bc;
+  Ac.resize(2,2);
+  Bc.resize(2,1);
+  Ac << 0  , 1,
+       -0.01  , -5;
+  
+  Bc << 0,
+       0.1;
+       
+  A = (Eigen::MatrixXd::Identity(Ac.rows(), Ac.rows()) + 0.5*Ac*0.01) * (Eigen::MatrixXd::Identity(Ac.rows(), Ac.rows()) - 0.5*Ac*0.01).inverse();
+  B = (Ac).inverse()*(A-Eigen::MatrixXd::Identity(Ac.rows(), Ac.rows()))*Bc;
+  
+  
+  ROS_FATAL_STREAM("\n"<<A);
+  ROS_FATAL_STREAM("\n"<<B);
+  
   
   Eigen::MatrixXd Qh; Qh.resize(2,2); 
   Qh <<1,0,
@@ -134,27 +156,31 @@ int main(int argc, char **argv)
   Eigen::MatrixXd Ba; Ba.resize(4,1); 
   Ba << B,
         B;
-  Eigen::MatrixXd Ca; Ca.resize(2,4);
-  Ca << 1, 0, 0, 0,
-        0, 0, 1, 0;
+  Eigen::MatrixXd Ca; Ca = blkdiag(C,2);
 
-  double alpha = 0.9;
+  double alpha = 0.8;
 
   Eigen::MatrixXd Q = alpha*Qh + (1-alpha)*Qr;
   Eigen::MatrixXd R1 = alpha*Rh;
   Eigen::MatrixXd R2 = (1-alpha)*Rr;
   
+  dMPC.setHorizon(N);
+  dMPC.setSysParams(Aa,Ba,Ca);
+  dMPC.setCostsParams(Qh,Rh,Qr,Rr,alpha);
   
-for(int i=0;i<10;i++)
-{  
-  auto start = std::chrono::steady_clock::now();
-  Eigen::MatrixXd K_mpc = dist_mpc_gain(Aa,Ba,Ca,Q,R1,Q,R2,N);
-  auto mid = std::chrono::steady_clock::now();
-  ROS_INFO_STREAM("time to command: "<<std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count());
-}
+  
+  for(int i=0;i<10;i++)
+  {
+    auto start = std::chrono::steady_clock::now();
+    Eigen::MatrixXd K_mpc = dist_mpc_gain(Aa,Ba,Ca,Q,R1,Q,R2,N);
+    Eigen::MatrixXd K_mpc2 = dMPC.distMPCGain();
+    ROS_FATAL_STREAM("comparison : "<< (K_mpc2 - K_mpc).norm() );
+    auto mid = std::chrono::steady_clock::now();
+    ROS_INFO_STREAM("time to command: "<<std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count());
+  }
 
-
-//   ROS_FATAL_STREAM("\n\n\n"<<K_mpc);
+     ROS_INFO_STREAM("\n"<< dMPC.distMPCGain());
+  
   
   
   
