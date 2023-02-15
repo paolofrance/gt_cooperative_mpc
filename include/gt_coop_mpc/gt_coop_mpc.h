@@ -8,14 +8,14 @@
 #include <geometry_msgs/TwistStamped.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Float32.h>
-#include <gt_coop_mpc/PoseMPC.h>
+#include <geometry_msgs/PoseArray.h>
 
 #include <state_space_filters/filtered_values.h>
 #include <cnr_controller_interface/cnr_joint_command_controller_interface.h>
 #include <cnr_hardware_interface/posveleff_command_interface.h>
 #include <cnr_hardware_interface/veleff_command_interface.h>
 
-#include <gt_coop_mpc/mpc_utils.h>
+#include <distributed_mpc/d_mpc.h>
 
 
 
@@ -31,7 +31,8 @@ namespace control
  * @brief The GtCoopMPC class
  */
 class GtCoopMPC: public cnr::control::JointCommandController<
-        hardware_interface::JointHandle, hardware_interface::VelocityJointInterface>
+//         hardware_interface::JointHandle, hardware_interface::VelocityJointInterface>
+        hardware_interface::PosVelEffJointHandle, hardware_interface::PosVelEffJointInterface>
 {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -50,7 +51,8 @@ protected:
   double alpha_;
   double alpha_max_;
   double alpha_min_;
-  DistMPC dMPC_;
+  
+  DistMPC* dMPC_;
   
   ect::FilteredVectorXd wrench_fitler_;
 
@@ -66,10 +68,6 @@ protected:
   Eigen::Affine3d T_robot_base_targetpose_;
   Eigen::Affine3d T_human_base_targetpose_;
   
-  Eigen::MatrixXd A_;
-  Eigen::MatrixXd B_;
-  Eigen::MatrixXd B_single_;
-  
   Eigen::MatrixXd Qh_;
   Eigen::MatrixXd Qr_;
   
@@ -82,9 +80,15 @@ protected:
   
   Eigen::MatrixXd K_mpc_;
   
+  Eigen::Vector3d initial_trans_; 
+  Eigen::Vector3d initial_rot_;
+  
   bool use_cartesian_reference_;
   bool robot_active_;
 
+  int count_;
+  int horizon_;
+  
   bool first_cycle_;
   bool new_sp_available_;
   
@@ -134,8 +138,8 @@ protected:
   bool getSSMatrix(const int dofs, const Eigen::Vector6d& M_inv, const Eigen::Vector6d& D, const Eigen::Vector6d& K, Eigen::MatrixXd& A, Eigen::MatrixXd& B, Eigen::MatrixXd& C);
   
   void wrenchCallback             (const geometry_msgs::WrenchStampedConstPtr& msg );
-  void setRobotTargetPoseCallback (const gt_coop_mpc::PoseMPC::ConstPtr&   msg );
-  void setHumanTargetPoseCallback (const gt_coop_mpc::PoseMPC::ConstPtr&  msg );
+  void setRobotTargetPoseCallback (const geometry_msgs::PoseArray::ConstPtr&   msg );
+  void setHumanTargetPoseCallback (const geometry_msgs::PoseArray::ConstPtr&  msg );
   void setTargetJointsCallback    (const sensor_msgs::JointStateConstPtr&      msg );
   void setAlpha                   (const std_msgs::Float32ConstPtr&  msg );
   

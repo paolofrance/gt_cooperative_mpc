@@ -27,7 +27,9 @@
   <depend>joint_limits_interface</depend>
   <depend>cnr_cartesian_velocity_controller</depend>  
   <depend>message_generation</depend>
-  <depend>message_runtime</depend>
+  <depend>message_runtime</depend>  
+  <depend>distributed_mpc</depend>  
+
 
 
 

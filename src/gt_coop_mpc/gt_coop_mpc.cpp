@@ -156,8 +156,6 @@ bool GtCoopMPC::doInit()
   
   GET_AND_RETURN(this->getControllerNh(),"n_dofs",n_dofs_);
   
-  A_   .resize(2*n_dofs_,2*n_dofs_);   A_   .setZero();
-  B_   .resize(2*n_dofs_,n_dofs_);     B_   .setZero();
   Qh_  .resize(2*n_dofs_,2*n_dofs_);   Qh_  .setZero();
   Qr_  .resize(2*n_dofs_,2*n_dofs_);   Qr_  .setZero();  
   Q_gt_.resize(2*n_dofs_,2*n_dofs_);   Q_gt_.setZero();
@@ -172,7 +170,7 @@ bool GtCoopMPC::doInit()
           external_wrench_topic,5,boost::bind(&GtCoopMPC::wrenchCallback,this,_1), false);
     
     this->template add_subscriber<std_msgs::Float32>("/alpha",5,boost::bind(&GtCoopMPC::setAlpha,this,_1), false);
-    this->template add_subscriber<gt_coop_mpc::PoseMPC>("/human_target",5,boost::bind(&GtCoopMPC::setHumanTargetPoseCallback,this,_1), false);
+    this->template add_subscriber<geometry_msgs::PoseArray>("/human_target",5,boost::bind(&GtCoopMPC::setHumanTargetPoseCallback,this,_1), false);
     
     GET_AND_DEFAULT( this->getControllerNh(), "robot_active", robot_active_, true);
     GET_AND_DEFAULT( this->getControllerNh(), "use_cartesian_reference", use_cartesian_reference_, false);
@@ -180,7 +178,7 @@ bool GtCoopMPC::doInit()
     {
       std::string pose_target;
       GET_AND_RETURN( this->getControllerNh(), "pose_target"  , pose_target);
-      this->template add_subscriber<gt_coop_mpc::PoseMPC>(pose_target,5,boost::bind(&GtCoopMPC::setRobotTargetPoseCallback,this,_1), false);
+      this->template add_subscriber<geometry_msgs::PoseArray>(pose_target,5,boost::bind(&GtCoopMPC::setRobotTargetPoseCallback,this,_1), false);
     }
     else
     {
@@ -235,31 +233,16 @@ bool GtCoopMPC::doInit()
     w_b_filt_ = wrench_fitler_.getUpdatedValue();
   }
   
-  Eigen::Vector6d M,D,K,M_inv;
   {  // IMpedance PArameters and mass inverse
-    getImpedanceParams(M,D,K);
+    getImpedanceParams(M_,D_,K_);
     for (unsigned int iAx=0;iAx<6;iAx++)
-      M_inv(iAx)=1.0/M(iAx);  
+      M_inv_(iAx)=1.0/M_(iAx);  
   }
   
   mask_ = getMask();
   
   Eigen::MatrixXd A,B,C;
-  getSSMatrix(n_dofs_,M_inv,D,K,A,B,C);
-    
-  // consituous to discrete
-  c2d(A,B, this->m_sampling_period, A_, B_);
-    
-  // augented system
-  Eigen::MatrixXd Aa = dMPC_.blkdiag(A_,2);
-  CNR_INFO(this->logger(),CYAN<<"Aa\n"   << Aa);
-  Eigen::MatrixXd Ba; Ba.resize(Aa.rows(),1);
-  CNR_INFO(this->logger(),CYAN<<"Ba1\n"   << Ba);
-  Ba << B_,
-        B_;
-  CNR_INFO(this->logger(),CYAN<<"Ba2\n"   << Ba);
-  Eigen::MatrixXd Ca; Ca = dMPC_.blkdiag(C,2);
-  CNR_INFO(this->logger(),CYAN<<"Ca\n"   << Ca);
+  getSSMatrix(n_dofs_,M_inv_,D_,K_,A,B,C);
   
   getWeightMatrix("Qh",2*n_dofs_,Qh_);
   getWeightMatrix("Qr",2*n_dofs_,Qr_);
@@ -271,21 +254,22 @@ bool GtCoopMPC::doInit()
   GET_AND_DEFAULT( this->getControllerNh(), "alpha_max", alpha_max_,0.95);
   GET_AND_DEFAULT( this->getControllerNh(), "alpha_min", alpha_min_,0.05);
   
-  int horizon;
-  GET_AND_DEFAULT( this->getControllerNh(), "horizon", horizon,50);
+  GET_AND_DEFAULT( this->getControllerNh(), "horizon", horizon_,50);
   
-  robot_pose_sp_.resize(horizon);
-  human_pose_sp_.resize(horizon);
+  robot_pose_sp_.resize(horizon_);
+  human_pose_sp_.resize(horizon_);
   
   
-  dMPC_.setHorizon(horizon);
-  dMPC_.setSysParams(Aa,Ba,Ca);
-  dMPC_.setCostsParams(Qh_,Rh_,Qr_,Rr_,alpha_);
-  
-  K_mpc_ = dMPC_.distMPCGain();
-  
-  CNR_INFO(this->logger(),CYAN<<"K_mpc_\n"   << K_mpc_);
-  
+  {  // INIT MPC
+    dMPC_ = new DistMPC(n_dofs_, horizon_);
+    dMPC_->setC2DSysParams(A,B,C, this->m_sampling_period);
+    dMPC_->setCostsParams(Qh_,Rh_,Qr_,Rr_);
+    dMPC_->setAlpha(alpha_);
+    
+    K_mpc_ = dMPC_->distCoopMPCGain();
+    
+    CNR_INFO(this->logger(),CYAN<<"K_mpc_\n"   << K_mpc_);
+  }
   
   w_b_init_ = false;
   first_cycle_ = true;  
@@ -304,9 +288,9 @@ bool GtCoopMPC::doInit()
   human_ref_pose_pub_       = this->template add_publisher<geometry_msgs::PoseStamped>  ("/human_ref_pos",5);
   human_wrench_pub_         = this->template add_publisher<geometry_msgs::WrenchStamped>("/human_wrench",5);
   delta_W_pub_              = this->template add_publisher<geometry_msgs::WrenchStamped>("/delta_force",5);
-  kp_pub_              = this->template add_publisher<std_msgs::Float32>("/Kp",5);
-  kv_pub_              = this->template add_publisher<std_msgs::Float32>("/Kv",5);
-  alpha_pub_              = this->template add_publisher<std_msgs::Float32>("/alpha_gt",5);
+  kp_pub_                   = this->template add_publisher<std_msgs::Float32>("/Kp",5);
+  kv_pub_                   = this->template add_publisher<std_msgs::Float32>("/Kv",5);
+  alpha_pub_                = this->template add_publisher<std_msgs::Float32>("/alpha_gt",5);
   
   CNR_INFO(this->logger(),"intialized !!");
   CNR_RETURN_TRUE(this->logger());
@@ -318,8 +302,6 @@ bool GtCoopMPC::doStarting(const ros::Time& time)
 {
   CNR_TRACE_START(this->logger(),"Starting Controller");  
   
-  ROS_FATAL_STREAM("qui qui" );
-
   q_sp_  = this->getPosition();
   dq_sp_ = this->getVelocity();
   q_  = q_sp_;
@@ -358,9 +340,17 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
     dq_sp_ = this->getVelocity();
     T_human_base_targetpose_ = chain_bt_->getTransformation(q_sp_);
     T_robot_base_targetpose_ = chain_bt_->getTransformation(q_sp_);
-    robot_pose_sp_[0] = tf2::toMsg (T_robot_base_targetpose_);
-    human_pose_sp_[0] = tf2::toMsg (T_robot_base_targetpose_);
+    for (int i=0;i<horizon_;i++)
+    {
+      robot_pose_sp_[i] = tf2::toMsg (T_robot_base_targetpose_);
+      human_pose_sp_[i] = tf2::toMsg (T_robot_base_targetpose_);
+    }
     first_cycle_ = false;
+    count_=0;
+    Eigen::Affine3d T_b_t_init = chain_bt_->getTransformation(q_); 
+    Eigen::Quaterniond q(T_b_t_init.rotation());
+    initial_trans_ = T_b_t_init.translation();
+    initial_rot_   = q.toRotationMatrix().eulerAngles(2, 1, 0);
   }
   
   
@@ -394,55 +384,68 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
   Eigen::Vector6d cart_acc_nl_of_t_in_b  = chain_bt_->getDTwistNonLinearPartTool(q_,dq_); // DJ*Dq
   Eigen::Vector6d cart_acc_of_t_in_b; cart_acc_of_t_in_b.setZero();
   
-  Eigen::Matrix<double,6,1> robot_cartesian_error_actual_target_in_b;
-  rosdyn::getFrameDistance(T_robot_base_targetpose_ , T_b_t, robot_cartesian_error_actual_target_in_b);
-  Eigen::Matrix<double,6,1> human_cartesian_error_actual_target_in_b;
-  rosdyn::getFrameDistance(T_human_base_targetpose_ , T_b_t, human_cartesian_error_actual_target_in_b);
+    
+  Eigen::Vector3d cart_pos = T_b_t.translation();
+  Eigen::VectorXd X(2*n_dofs_);
+  X << cart_pos.segment(0,n_dofs_), cart_vel_of_t_in_b.segment(0,n_dofs_); 
   
-  // update gains
+  // MPC reference
+  Eigen::VectorXd ref_h(n_dofs_*horizon_);
+  Eigen::VectorXd ref_r(n_dofs_*horizon_);
   
-  Eigen::VectorXd reference_h; reference_h.resize(2*n_dofs_); 
-  Eigen::VectorXd reference_r; reference_r.resize(2*n_dofs_); 
-  
-  reference_h.segment(0,n_dofs_) = human_cartesian_error_actual_target_in_b.segment(0,n_dofs_);
-  reference_h.segment(n_dofs_,n_dofs_) = Eigen::VectorXd::Zero(n_dofs_);
-  reference_r.segment(0,n_dofs_) = robot_cartesian_error_actual_target_in_b.segment(0,n_dofs_);
-  reference_r.segment(n_dofs_,n_dofs_) = Eigen::VectorXd::Zero(n_dofs_);
-  
-  Eigen::VectorXd reference = Q_gt_.inverse() * (Qh_*reference_h + Qr_*reference_r);
-  Eigen::Vector3d world_reference = Q_gt_.inverse() * ( Qh_*T_human_base_targetpose_.translation() + Qr_*T_robot_base_targetpose_.translation() );
-  
-  Eigen::Vector6d global_reference;
-  if(robot_active_)
+  for (int i = 0;i<horizon_;i++)
   {
-    global_reference.segment(0,n_dofs_) = reference.segment(0,n_dofs_);
-    global_reference.segment(n_dofs_,6-n_dofs_) = robot_cartesian_error_actual_target_in_b.segment(n_dofs_,6-n_dofs_);
+    if(n_dofs_==1)
+    {
+      ref_h(i*n_dofs_)   = initial_trans_(0) + human_pose_sp_[i].position.x;
+      ref_r(i*n_dofs_)   = initial_trans_(0) + robot_pose_sp_[i].position.x;
+    }
+    else if(n_dofs_==2)
+    {
+      ref_h(i*n_dofs_)   = initial_trans_(0) + human_pose_sp_[i].position.x;
+      ref_h(i*n_dofs_+1) = initial_trans_(1) + human_pose_sp_[i].position.y;
+      ref_r(i*n_dofs_)   = initial_trans_(0) + robot_pose_sp_[i].position.x;
+      ref_r(i*n_dofs_+1) = initial_trans_(1) + robot_pose_sp_[i].position.y;
+    }
+    else if(n_dofs_==3)
+    {
+      ref_h(i*n_dofs_)   = initial_trans_(0) + human_pose_sp_[i].position.x;
+      ref_h(i*n_dofs_+1) = initial_trans_(1) + human_pose_sp_[i].position.y;
+      ref_h(i*n_dofs_+2) = initial_trans_(2) + human_pose_sp_[i].position.z;
+      ref_r(i*n_dofs_)   = initial_trans_(0) + robot_pose_sp_[i].position.x;
+      ref_r(i*n_dofs_+1) = initial_trans_(1) + robot_pose_sp_[i].position.y;
+      ref_r(i*n_dofs_+2) = initial_trans_(2) + robot_pose_sp_[i].position.z;
+    }
+    else
+      CNR_ERROR(this->logger(),"Too much dofs . Rotations non yet implemented");
+    
+
   }
-  else
-  {
-    global_reference = robot_cartesian_error_actual_target_in_b;
-  }
   
-  Eigen::VectorXd control(2*n_dofs_); control.setZero();
+  count_++;
   
+  // MPC control computation
+  dMPC_->setAlpha(alpha_);
+  K_mpc_ = dMPC_->distCoopMPCGain();
+
+  Eigen::VectorXd control = dMPC_->controlInputs(X,ref_h,ref_r);
   
-  // TODO MPC
-  
-  
-  
+  Eigen::VectorXd uh,ur;
+  dMPC_->getControlInputs(uh,ur);
+    
   Eigen::Vector6d human_wrench_ic = mask_.cwiseProduct(wrench);
+  
   Eigen::Vector6d nominal_human_wrench_ic; nominal_human_wrench_ic.setZero(); 
-  nominal_human_wrench_ic.segment(0,n_dofs_) = control.segment(0,n_dofs_);
+  nominal_human_wrench_ic.segment(0,n_dofs_) = uh;
   
   Eigen::Vector6d robot_wrench_ic; robot_wrench_ic.setZero(); 
   if(robot_active_)
-    robot_wrench_ic.segment(0,n_dofs_) = control.segment(n_dofs_,n_dofs_);
-  
+    robot_wrench_ic.segment(0,n_dofs_) = ur;  
   
   cart_acc_of_t_in_b = (M_inv_).cwiseProduct(
-                        K_.cwiseProduct(global_reference) +
                         D_.cwiseProduct(-cart_vel_of_t_in_b) +
                         human_wrench_ic + robot_wrench_ic);
+  
   
   Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_of_t_in_b, Eigen::ComputeThinU | Eigen::ComputeThinV);
   if (svd.singularValues()(svd.cols()-1)==0)
@@ -457,8 +460,8 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
 
   
   this->setCommandPosition( q_ );
-//   this->setCommandVelocity( dq_);
-  this->setCommandVelocity( dq_sp_);
+  this->setCommandVelocity( dq_);
+//   this->setCommandVelocity( dq_sp_);
   
   
   
@@ -496,18 +499,18 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
     this->publish(human_wrench_pub_,w);
   }
   
-  {
-    geometry_msgs::PoseStamped ref;
-    ref.header.stamp = stamp;
-    
-    ref.pose.position.x = world_reference(0);
-    ref.pose.position.y = world_reference(1);
-    ref.pose.position.z = world_reference(2);
-    
-    ref.pose.orientation = ps.pose.orientation;
-    
-    this->publish(reference_pose_pub_,ref);
-  }
+//   {
+//     geometry_msgs::PoseStamped ref;
+//     ref.header.stamp = stamp;
+//     
+//     ref.pose.position.x = world_reference(0);
+//     ref.pose.position.y = world_reference(1);
+//     ref.pose.position.z = world_reference(2);
+//     
+//     ref.pose.orientation = ps.pose.orientation;
+//     
+//     this->publish(reference_pose_pub_,ref);
+//   }
   
   {
     std_msgs::Float32 m;
@@ -526,9 +529,9 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
   this->publish(robot_wrench_pub_,robot_w);
   this->publish(nominal_h_wrench_pub_,human_w);
   
-  auto mid = std::chrono::steady_clock::now();
-  CNR_INFO_COND(this->logger(),std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count()>=8000
-                 ,RED<<"too much time to command: "<<std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count());
+//   auto mid = std::chrono::steady_clock::now();
+//   CNR_INFO_COND(this->logger(),std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count()>=8000
+//                  ,RED<<"too much time to command: "<<std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count());
 
   CNR_RETURN_TRUE_THROTTLE_DEFAULT(this->logger());
 
@@ -628,14 +631,13 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
   }
 
   
-  void GtCoopMPC::setRobotTargetPoseCallback(const gt_coop_mpc::PoseMPC::ConstPtr& msg)
+  void GtCoopMPC::setRobotTargetPoseCallback(const geometry_msgs::PoseArray::ConstPtr& msg)
   {
     try
     {
       for(int i=0;i<robot_pose_sp_.size();i++)
       {
-        robot_pose_sp_.at(i) = msg->poses_array[i];
-        ROS_INFO_STREAM(robot_pose_sp_.at(i));
+        robot_pose_sp_.at(i) = msg->poses[i];
       }
       new_sp_available_ = true;
     }
@@ -644,16 +646,15 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
       ROS_ERROR("Something wrong in target callback");
     }
   }
-  void GtCoopMPC::setHumanTargetPoseCallback(const gt_coop_mpc::PoseMPC::ConstPtr& msg)
+  void GtCoopMPC::setHumanTargetPoseCallback(const geometry_msgs::PoseArray::ConstPtr& msg)
   {
     try
     {
 
       for(int i=0;i<human_pose_sp_.size();i++)
       {
-        human_pose_sp_.at(i) = msg->poses_array[i];
-      }
-      
+        human_pose_sp_.at(i) = msg->poses[i];
+      }      
     }
     catch(...)
     {

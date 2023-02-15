@@ -22,6 +22,7 @@ find_package(catkin REQUIRED COMPONENTS
   cnr_cartesian_velocity_controller
   geometry_msgs
   message_generation
+  distributed_mpc
 )
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -39,8 +40,7 @@ generate_messages(
 
 catkin_package(
  INCLUDE_DIRS include
-#  LIBRARIES gt_traj_deformation
- CATKIN_DEPENDS urdf cnr_controller_interface state_space_filters cnr_hardware_interface sensor_msgs std_msgs name_sorting joint_limits_interface pluginlib message_runtime
+ CATKIN_DEPENDS urdf cnr_controller_interface state_space_filters cnr_hardware_interface sensor_msgs std_msgs name_sorting joint_limits_interface pluginlib message_runtime distributed_mpc
  cnr_cartesian_velocity_controller
  DEPENDS EIGEN3
 )
@@ -48,13 +48,6 @@ catkin_package(
 include_directories( include ${catkin_INCLUDE_DIRS} )
 
 
-
-add_library(
-mpc_utils src/gt_coop_mpc/mpc_utils.cpp
-)
-
-add_executable(mpc_node src/gt_coop_mpc/mpc_node.cpp)
-target_link_libraries(mpc_node mpc_utils ${catkin_LIBRARIES})
 
 add_executable(test_node src/gt_coop_mpc/test.cpp)
 target_link_libraries(test_node ${catkin_LIBRARIES})
@@ -69,7 +62,7 @@ target_link_libraries(array_traj_sub ${catkin_LIBRARIES})
 
 add_library(${PROJECT_NAME} src/${PROJECT_NAME}/gt_coop_mpc.cpp )
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(${PROJECT_NAME} mpc_utils ${catkin_LIBRARIES} Eigen3::Eigen)
+target_link_libraries(${PROJECT_NAME}  ${catkin_LIBRARIES} Eigen3::Eigen)
 target_compile_options(${PROJECT_NAME} PUBLIC -Wall -faligned-new
        $<$<CONFIG:Release>:-Ofast -funroll-loops -ffast-math >)
 
