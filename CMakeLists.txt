@@ -52,11 +52,11 @@ include_directories( include ${catkin_INCLUDE_DIRS} )
 add_executable(test_node src/gt_coop_mpc/test.cpp)
 target_link_libraries(test_node ${catkin_LIBRARIES})
 
-
-add_executable(array_traj_node src/gt_coop_mpc/array_traj_node.cpp)
-target_link_libraries(array_traj_node ${catkin_LIBRARIES})
-add_executable(array_traj_sub src/gt_coop_mpc/array_traj_sub.cpp)
-target_link_libraries(array_traj_sub ${catkin_LIBRARIES})
+# 
+# add_executable(array_traj_node src/gt_coop_mpc/array_traj_node.cpp)
+# target_link_libraries(array_traj_node ${catkin_LIBRARIES})
+# add_executable(array_traj_sub src/gt_coop_mpc/array_traj_sub.cpp)
+# target_link_libraries(array_traj_sub ${catkin_LIBRARIES})
 
 
 
