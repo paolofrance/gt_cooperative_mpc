@@ -259,10 +259,13 @@ bool GtCoopMPC::doInit()
   robot_pose_sp_.resize(horizon_);
   human_pose_sp_.resize(horizon_);
   
+  GET_AND_DEFAULT( this->getControllerNh(), "control_sampling_time", control_sampling_time_, this->m_sampling_period);
+  
+  CNR_INFO(this->logger(), GREEN<< "Prediction horizon: " << horizon_*control_sampling_time_ <<" seconds . timesteps: "<<horizon_<< ", sampling period: "<< control_sampling_time_);
   
   {  // INIT MPC
     dMPC_ = new DistMPC(n_dofs_, horizon_);
-    dMPC_->setC2DSysParams(A,B,C, this->m_sampling_period);
+    dMPC_->setC2DSysParams(A,B,C, control_sampling_time_);
     dMPC_->setCostsParams(Qh_,Rh_,Qr_,Rr_);
     dMPC_->setAlpha(alpha_);
     
@@ -418,8 +421,6 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
     }
     else
       CNR_ERROR(this->logger(),"Too much dofs . Rotations non yet implemented");
-    
-
   }
   
   count_++;

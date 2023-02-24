@@ -88,6 +88,7 @@ protected:
 
   int count_;
   int horizon_;
+  double control_sampling_time_;
   
   bool first_cycle_;
   bool new_sp_available_;
