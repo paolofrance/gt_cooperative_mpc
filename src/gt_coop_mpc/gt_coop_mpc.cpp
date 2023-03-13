@@ -104,10 +104,11 @@ bool GtCoopMPC::getSSMatrix(const int dofs, const Eigen::Vector6d& M_inv, const 
   A.bottomLeftCorner (dofs,dofs)  = km.asDiagonal();
   A.bottomRightCorner(dofs,dofs)  = cm.asDiagonal();
   
-  B.block(0,0,dofs,1) = Eigen::MatrixXd::Zero(dofs, 1);
-  B.block(dofs,0,dofs,1) = M_inv.segment(0,dofs);
+  B.topLeftCorner   (dofs, dofs) = Eigen::MatrixXd::Zero(dofs, dofs);
+  B.bottomLeftCorner(dofs, dofs) = M_inv.segment(0,dofs).asDiagonal();
   
-  C << 1, 0;
+  C.topLeftCorner    (dofs, dofs) = Eigen::MatrixXd::Identity(dofs, dofs);
+  C.bottomRightCorner(dofs, dofs) = Eigen::MatrixXd::Zero(dofs, dofs);
   
   return true;
 }
@@ -352,8 +353,6 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
     count_=0;
     Eigen::Affine3d T_b_t_init = chain_bt_->getTransformation(q_); 
     Eigen::Quaterniond q(T_b_t_init.rotation());
-    initial_trans_ = T_b_t_init.translation();
-    initial_rot_   = q.toRotationMatrix().eulerAngles(2, 1, 0);
   }
   
   
@@ -400,24 +399,24 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
   {
     if(n_dofs_==1)
     {
-      ref_h(i*n_dofs_)   = initial_trans_(0) + human_pose_sp_[i].position.x;
-      ref_r(i*n_dofs_)   = initial_trans_(0) + robot_pose_sp_[i].position.x;
+      ref_h(i*n_dofs_)   = human_pose_sp_[i].position.x;
+      ref_r(i*n_dofs_)   = robot_pose_sp_[i].position.x;
     }
     else if(n_dofs_==2)
     {
-      ref_h(i*n_dofs_)   = initial_trans_(0) + human_pose_sp_[i].position.x;
-      ref_h(i*n_dofs_+1) = initial_trans_(1) + human_pose_sp_[i].position.y;
-      ref_r(i*n_dofs_)   = initial_trans_(0) + robot_pose_sp_[i].position.x;
-      ref_r(i*n_dofs_+1) = initial_trans_(1) + robot_pose_sp_[i].position.y;
+      ref_h(i*n_dofs_)   = human_pose_sp_[i].position.x;
+      ref_h(i*n_dofs_+1) = human_pose_sp_[i].position.y;
+      ref_r(i*n_dofs_)   = robot_pose_sp_[i].position.x;
+      ref_r(i*n_dofs_+1) = robot_pose_sp_[i].position.y;
     }
     else if(n_dofs_==3)
     {
-      ref_h(i*n_dofs_)   = initial_trans_(0) + human_pose_sp_[i].position.x;
-      ref_h(i*n_dofs_+1) = initial_trans_(1) + human_pose_sp_[i].position.y;
-      ref_h(i*n_dofs_+2) = initial_trans_(2) + human_pose_sp_[i].position.z;
-      ref_r(i*n_dofs_)   = initial_trans_(0) + robot_pose_sp_[i].position.x;
-      ref_r(i*n_dofs_+1) = initial_trans_(1) + robot_pose_sp_[i].position.y;
-      ref_r(i*n_dofs_+2) = initial_trans_(2) + robot_pose_sp_[i].position.z;
+      ref_h(i*n_dofs_)   = human_pose_sp_[i].position.x;
+      ref_h(i*n_dofs_+1) = human_pose_sp_[i].position.y;
+      ref_h(i*n_dofs_+2) = human_pose_sp_[i].position.z;
+      ref_r(i*n_dofs_)   = robot_pose_sp_[i].position.x;
+      ref_r(i*n_dofs_+1) = robot_pose_sp_[i].position.y;
+      ref_r(i*n_dofs_+2) = robot_pose_sp_[i].position.z;
     }
     else
       CNR_ERROR(this->logger(),"Too much dofs . Rotations non yet implemented");

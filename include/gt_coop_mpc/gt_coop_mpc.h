@@ -80,9 +80,6 @@ protected:
   
   Eigen::MatrixXd K_mpc_;
   
-  Eigen::Vector3d initial_trans_; 
-  Eigen::Vector3d initial_rot_;
-  
   bool use_cartesian_reference_;
   bool robot_active_;
 
