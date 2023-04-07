@@ -442,7 +442,11 @@ bool GtCoopMPC::doUpdate(const ros::Time& time, const ros::Duration& period)
   if(robot_active_)
     robot_wrench_ic.segment(0,n_dofs_) = ur;  
   
+  Eigen::Matrix<double,6,1> robot_cartesian_error_actual_target_in_b;
+  rosdyn::getFrameDistance(T_robot_base_targetpose_ , T_b_t, robot_cartesian_error_actual_target_in_b);
+  
   cart_acc_of_t_in_b = (M_inv_).cwiseProduct(
+                        K_.cwiseProduct(robot_cartesian_error_actual_target_in_b) +
                         D_.cwiseProduct(-cart_vel_of_t_in_b) +
                         human_wrench_ic + robot_wrench_ic);
   
